@@ -78,6 +78,14 @@ tr:hover td { background: var(--primary-glow); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
 .form-grid .full { grid-column: 1 / -1; }
 label { display: block; font-size: 10px; font-weight: 600; color: var(--text2); margin-bottom: 3px; text-transform: uppercase; letter-spacing: .4px; }
+label .req { color: var(--red); font-size: 12px; }
+.user-box { margin-top: 10px; padding: 10px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; display: flex; align-items: center; gap: 10px; }
+.user-box .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+.user-box .meta { flex: 1; min-width: 0; }
+.user-box .meta .uname { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-box .meta .role { font-size: 11px; color: var(--text2); }
+.user-box button { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 15px; padding: 4px; border-radius: 8px; }
+.user-box button:hover { color: var(--red); background: rgba(231,76,60,.12); }
 input, select, textarea { width: 100%; padding: 7px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: inherit; font-size: 12px; outline: none; transition: all .18s; }
 input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-glow); }
 textarea { resize: vertical; min-height: 44px; }
@@ -133,10 +141,11 @@ select option { background: var(--surface); }
     <div class="nav-item active" data-view="dashboard"><span class="icon">&#9632;</span> Dashboard</div>
     <div class="nav-item" onclick="openModal(null)"><span class="icon">+</span> New Record</div>
     <div class="nav-item" data-view="records"><span class="icon">&#9776;</span> All Records</div>
+    <div class="nav-item hidden" id="navUsers" data-view="users"><span class="icon">&#128101;</span> Users</div>
     <div style="margin-top:auto;padding-top:16px;border-top:1px solid var(--border);margin-top:16px;">
       <button class="theme-btn" onclick="toggleTheme()" id="themeBtn">🌙 Night Mode</button>
-      <div class="nav-item" onclick="exportCSV()" style="margin-top:8px"><span class="icon">&darr;</span> Export CSV</div>
-      <div class="nav-item" onclick="resetSharedData()" style="margin-top:8px"><span class="icon">&#128465;</span> Reset Data</div>
+      <div class="nav-item hidden" id="navReset" onclick="resetSharedData()" style="margin-top:8px"><span class="icon">&#128465;</span> Reset Data</div>
+      <div class="user-box" id="userBox"></div>
     </div>
   </aside>
 
@@ -150,13 +159,13 @@ select option { background: var(--surface); }
   <div class="modal fade-in">
     <h2 id="modalTitle">Add Entry</h2>
     <div class="form-grid">
-      <div class="full"><label>Tyre Size</label>
+      <div class="full"><label>Tyre Size <span class="req">*</span></label>
         <div class="input-group">
           <select id="fSizeSelect" onchange="toggleSizeInput()"></select>
           <input id="fSizeInput" class="hidden" placeholder="Enter size" oninput="syncSizeSelect()">
         </div>
       </div>
-      <div class="full"><label>Brand / Competitor</label>
+      <div class="full"><label>Brand / Competitor <span class="req">*</span></label>
         <div class="input-group">
           <select id="fCompSelect" onchange="toggleCompInput()"></select>
           <input id="fCompInput" class="hidden" placeholder="Enter brand" oninput="syncCompSelect()">
@@ -168,9 +177,9 @@ select option { background: var(--surface); }
           <input id="fPatternInput" class="hidden" placeholder="Enter pattern" oninput="syncPatternSelect()">
         </div>
       </div>
-      <div><label>Category</label><select id="fCategory"><option>OTR</option><option>Industrial</option><option>Solid</option><option>Truck & Bus</option><option>OTB</option><option>LCV/LT</option></select></div>
-      <div><label>Source</label><select id="fSource"><option>Dealer Quote</option><option>Website</option><option>Invoice</option><option>Market Visit</option><option>Phone Inquiry</option><option>Competitor Price List</option><option>Trade Show</option><option>Other</option></select></div>
-      <div><label>Price (AED)</label><input type="number" id="fPrice" step="0.01" min="0" placeholder="e.g. 4250"></div>
+      <div><label>Category <span class="req">*</span></label><select id="fCategory"><option>OTR</option><option>Industrial</option><option>Solid</option><option>Truck & Bus</option><option>OTB</option><option>LCV/LT</option></select></div>
+      <div><label>Source <span class="req">*</span></label><select id="fSource"><option>Dealer Quote</option><option>Website</option><option>Invoice</option><option>Market Visit</option><option>Phone Inquiry</option><option>Competitor Price List</option><option>Other</option></select></div>
+      <div><label>Price (AED) <span class="req">*</span></label><input type="number" id="fPrice" step="0.01" min="0" placeholder="e.g. 4250"></div>
       <div class="full"><label>Dealer / Distributor</label>
         <div class="input-group">
           <select id="fDealerSelect" onchange="toggleDealerInput()"></select>
@@ -221,30 +230,55 @@ let customPatterns = [];
 let customDealers = [];
 let lastSync = 0;
 let syncedJson = '';
+let currentUser = null;
+let usersList = [];
 
-async function apiGet() {
-  const r = await fetch(API_URL, { method: 'GET', cache: 'no-store' });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
-}
+function getToken() { return localStorage.getItem('tpi_token') || ''; }
+function setToken(t) { if (t) localStorage.setItem('tpi_token', t); else localStorage.removeItem('tpi_token'); }
+function isAdmin() { return currentUser && currentUser.role === 'admin'; }
+
 async function apiPost(body) {
+  if (!body.token) body.token = getToken();
   const r = await fetch(API_URL, { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+  const j = await r.json();
+  if (!j.ok) {
+    if (j.error === 'session-expired') { setToken(''); showLogin(); throw new Error('session-expired'); }
+    throw new Error(j.error || 'Request failed');
+  }
+  return j;
+}
+
+async function login(username, password) {
+  const j = await apiPost({ action: 'login', username, password });
+  setToken(j.token);
+  currentUser = j.user;
+  localStorage.setItem('tpi_user', JSON.stringify(j.user));
+  return j;
+}
+function logout() {
+  apiPost({ action: 'logout' }).catch(() => {});
+  setToken(''); currentUser = null;
+  localStorage.removeItem('tpi_user');
+  showLogin();
 }
 
 async function loadData() {
   try {
-    const j = await apiGet();
+    const j = await apiPost({ action: 'load' });
     data = Array.isArray(j.records) ? j.records : [];
     customBrands = Array.isArray(j.brands) ? j.brands : [];
     customSizes = Array.isArray(j.sizes) ? j.sizes : [];
     customPatterns = Array.isArray(j.patterns) ? j.patterns : [];
     customDealers = Array.isArray(j.dealers) ? j.dealers : [];
+    usersList = Array.isArray(j.users) ? j.users : [];
+    currentUser = j.whoami || null;
     lastSync = Date.now();
     syncedJson = JSON.stringify(j.records) + '|' + JSON.stringify([customBrands, customSizes, customPatterns, customDealers]);
     hideBanner();
+    renderUserBox();
   } catch (err) {
+    if (err && err.message === 'session-expired') return;
     showBanner('Cannot reach the shared database. Check that API_URL is set and the script is deployed.');
   }
 }
@@ -397,6 +431,8 @@ function getDealerValue() { const s=document.getElementById('fDealerSelect'); re
 
 // ======================== MODAL ========================
 function openModal(entry) {
+  if (!currentUser) { showLogin(); return; }
+  if (entry && !isAdmin()) { alert('Only the admin can edit records.'); return; }
   editId = entry ? entry.id : null;
   document.getElementById('modalTitle').textContent = editId ? 'Edit Entry' : 'New Entry';
   document.getElementById('modalSaveBtn').textContent = editId ? 'Update' : 'Save';
@@ -422,12 +458,15 @@ function collectForm() {
   };
 }
 function validateForm(f) {
-  if (!f.price || f.price <= 0) { alert('Enter valid price.'); return false; }
-  if (!f.size) { alert('Select or enter size.'); return false; }
-  if (!f.competitor) { alert('Select or enter brand.'); return false; }
+  if (!f.price || f.price <= 0) { alert('Price (AED) is required and must be more than 0.'); return false; }
+  if (!f.size) { alert('Tyre Size is required.'); return false; }
+  if (!f.competitor) { alert('Brand / Competitor is required.'); return false; }
+  if (!f.category) { alert('Category is required.'); return false; }
+  if (!f.source) { alert('Source is required.'); return false; }
   return true;
 }
 async function saveEntry() {
+  if (editId && !isAdmin()) { alert('Only the admin can edit records.'); return; }
   const f = collectForm();
   if (!validateForm(f)) return;
   ensureCustomBrand(f.competitor); ensureCustomSize(f.size); ensureCustomPattern(f.pattern); ensureCustomDealer(f.dealer);
@@ -440,13 +479,14 @@ async function saveEntry() {
     data[idx] = rec;
     try { await apiUpdateRecord(rec); lastSync = Date.now(); updateSyncPill(); } catch (err) { showBanner('Could not sync update to shared database.'); }
   } else {
-    const rec = { id: generateId(), ...f, createdAt: now, updatedAt: now };
+    const rec = { id: generateId(), ...f, createdAt: now, updatedAt: now, addedBy: currentUser ? currentUser.username : 'unknown' };
     data.unshift(rec);
     try { await apiAddRecord(rec); lastSync = Date.now(); updateSyncPill(); } catch (err) { showBanner('Could not sync new record to shared database.'); }
   }
   render();
 }
 async function deleteEntry(id) {
+  if (!isAdmin()) { alert('Only the admin can delete records.'); return; }
   if (!confirm('Delete entry?')) return;
   data = data.filter(d => d.id !== id);
   try { await apiDeleteRecord(id); lastSync = Date.now(); updateSyncPill(); } catch (err) { showBanner('Deleted locally but could not sync to shared database.'); }
@@ -454,6 +494,7 @@ async function deleteEntry(id) {
 }
 
 function resetSharedData() {
+  if (!isAdmin()) { alert('Only the admin can reset data.'); return; }
   if (!confirm('Delete ALL data from the SHARED database? This affects every team member.')) return;
   apiPost({ action: 'reset' }).then(() => {
     data = []; customBrands = []; customSizes = []; customPatterns = []; customDealers = [];
@@ -515,10 +556,149 @@ function renderLineChart(cId, labels, datasets) {
 
 // ======================== RENDER ========================
 function render() {
+  if (!currentUser && getToken()) { loadData().then(() => render()); return; }
+  if (!currentUser) { showLogin(); return; }
   const v = document.querySelector('.nav-item.active')?.dataset?.view || 'dashboard';
   const main = document.getElementById('app');
   if (v === 'dashboard') renderDashboard(main);
   else if (v === 'records') renderRecords(main);
+  else if (v === 'users' && isAdmin()) renderUsers(main);
+}
+
+// ======================== LOGIN ========================
+function showLogin() {
+  const main = document.getElementById('app');
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('userBox').innerHTML = '';
+  main.innerHTML = `
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px">
+      <div class="card" style="width:100%;max-width:380px;padding:32px;animation:fadeIn .25s ease">
+        <div style="text-align:center;margin-bottom:24px">
+          <div class="sidebar-logo" style="justify-content:center;margin-bottom:12px"><span>TP</span>Tyre Price Intel</div>
+          <p style="color:var(--text2);font-size:13px">Sign in to access the shared price database</p>
+        </div>
+        <label>Username</label>
+        <input class="search" id="loginUser" style="width:100%;margin-bottom:12px" placeholder="Username" autocomplete="username">
+        <label>Password</label>
+        <input class="search" id="loginPass" type="password" style="width:100%;margin-bottom:16px" placeholder="Password" autocomplete="current-password">
+        <div id="loginErr" style="color:var(--red);font-size:12px;margin-bottom:10px;min-height:16px"></div>
+        <button class="btn btn-primary" style="width:100%" id="loginBtn" onclick="doLogin()">Sign In</button>
+        <p style="margin-top:16px;font-size:11px;color:var(--text2);text-align:center">Admin default: <b>admin / admin</b> (change it in Users)</p>
+      </div>
+    </div>`;
+  setTimeout(() => document.getElementById('loginUser').focus(), 50);
+}
+async function doLogin() {
+  const u = document.getElementById('loginUser').value.trim();
+  const p = document.getElementById('loginPass').value;
+  const err = document.getElementById('loginErr');
+  const btn = document.getElementById('loginBtn');
+  if (!u || !p) { err.textContent = 'Enter username and password.'; return; }
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  try {
+    await login(u, p);
+    err.textContent = '';
+    renderUserBox();
+    await loadData();
+    switchView('dashboard');
+  } catch (e) {
+    err.textContent = (e.message === 'session-expired' ? 'Session expired. Sign in again.' : e.message || 'Login failed.');
+    btn.disabled = false; btn.textContent = 'Sign In';
+  }
+}
+
+function renderUserBox() {
+  const box = document.getElementById('userBox');
+  if (!box) return;
+  if (!currentUser) { box.innerHTML = ''; return; }
+  const initial = (currentUser.name || currentUser.username || '?').charAt(0).toUpperCase();
+  box.innerHTML = `
+    <div class="avatar">${initial}</div>
+    <div class="meta">
+      <div class="uname">${currentUser.name || currentUser.username}</div>
+      <div class="role">${currentUser.role === 'admin' ? 'Admin' : 'Member'}</div>
+    </div>
+    <button onclick="logout()" title="Sign out">&#10162;</button>`;
+  document.getElementById('navUsers').classList.toggle('hidden', !isAdmin());
+  document.getElementById('navReset').classList.toggle('hidden', !isAdmin());
+}
+
+// ======================== USERS (admin) ========================
+function renderUsers(main) {
+  main.innerHTML = `
+    <div class="header">
+      <div><h1>Team Users</h1><p>${usersList.length} accounts &middot; admin can create, edit, reset passwords</p></div>
+      <div class="header-actions"><button class="btn btn-primary" onclick="document.getElementById('newUserForm').classList.remove('hidden')">+ New User</button></div>
+    </div>
+    <div class="card hidden" id="newUserForm" style="margin-bottom:20px;padding:20px">
+      <h3 style="margin-bottom:14px">Create User</h3>
+      <div class="form-grid">
+        <div><label>Name</label><input class="search" id="nuName" placeholder="e.g. Ramesh"></div>
+        <div><label>Username <span class="req">*</span></label><input class="search" id="nuUser" placeholder="e.g. ramesh" style="text-transform:lowercase"></div>
+        <div><label>Password <span class="req">*</span></label><input class="search" id="nuPass" type="password" placeholder="Minimum 4 characters"></div>
+        <div><label>Role</label><select id="nuRole"><option value="user">Member (can add only)</option><option value="admin">Admin</option></select></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn btn-primary" onclick="createUser()">Create</button>
+        <button class="btn btn-outline" onclick="document.getElementById('newUserForm').classList.add('hidden')">Cancel</button>
+      </div>
+      <div id="nuErr" style="color:var(--red);font-size:12px;margin-top:10px;min-height:14px"></div>
+    </div>
+    <div class="card" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Created</th><th style="text-align:center">Actions</th></tr></thead>
+          <tbody>${usersList.map(u => `
+            <tr>
+              <td>${u.name}</td><td><b>${u.username}</b></td>
+              <td><span class="badge" style="background:${u.role === 'admin' ? 'rgba(108,92,231,.15)' : 'rgba(39,174,96,.15)'};color:${u.role === 'admin' ? 'var(--primary)' : 'var(--green)'};border:1px solid ${u.role === 'admin' ? 'rgba(108,92,231,.4)' : 'rgba(39,174,96,.4)'}">${u.role === 'admin' ? 'Admin' : 'Member'}</span></td>
+              <td>${shortDate(u.createdAt)}</td>
+              <td style="text-align:center">
+                <button class="btn btn-sm btn-outline" onclick="editUser('${u.username}')" title="Edit / reset password">✎</button>
+                ${u.username !== 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.username}')" title="Delete user">✕</button>` : ''}
+              </td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+function createUser() {
+  const name = document.getElementById('nuName').value.trim();
+  const username = document.getElementById('nuUser').value.trim().toLowerCase();
+  const password = document.getElementById('nuPass').value;
+  const role = document.getElementById('nuRole').value;
+  const err = document.getElementById('nuErr');
+  if (!username || !password) { err.textContent = 'Username and password are required.'; return; }
+  if (password.length < 4) { err.textContent = 'Password must be at least 4 characters.'; return; }
+  apiPost({ action: 'createUser', username, password, name, role }).then(j => {
+    usersList = j.users; err.textContent = '';
+    document.getElementById('newUserForm').classList.add('hidden');
+    renderUsers(document.getElementById('app'));
+  }).catch(e => { err.textContent = e.message; });
+}
+function editUser(username) {
+  const u = usersList.find(x => x.username === username);
+  if (!u) return;
+  const np = prompt('New password for ' + username + ' (leave empty to keep current):');
+  if (np === null) return;
+  if (np && np.length < 4) { alert('Password must be at least 4 characters.'); return; }
+  const nr = u.username === 'admin' ? 'admin' : prompt('Role for ' + username + ' (admin/user):', u.role);
+  if (nr === null) return;
+  if (nr !== 'admin' && nr !== 'user') { alert('Role must be admin or user.'); return; }
+  apiPost({ action: 'updateUser', username, password: np || undefined, role: nr, name: u.name }).then(j => {
+    usersList = j.users;
+    if (u.username === currentUser.username && nr !== currentUser.role) currentUser = { ...currentUser, role: nr };
+    renderUsers(document.getElementById('app'));
+    renderUserBox();
+  }).catch(e => alert(e.message));
+}
+function deleteUser(username) {
+  if (!confirm('Delete user "' + username + '"?')) return;
+  apiPost({ action: 'deleteUser', username }).then(j => {
+    usersList = j.users;
+    renderUsers(document.getElementById('app'));
+  }).catch(e => alert(e.message));
 }
 
 // ======================== DASHBOARD ========================
@@ -563,11 +743,12 @@ function renderDashboard(main) {
       ${filtered.length ? `
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Brand</th><th>Category</th><th>Size</th><th style="text-align:right">Price</th><th>Source</th><th>Dealer</th><th>Added</th><th style="text-align:center">History</th></tr></thead>
+          <thead><tr><th>Brand</th><th>Category</th><th>Size</th><th style="text-align:right">Price</th><th>Source</th><th>Dealer</th><th>Added By</th><th>Added</th><th style="text-align:center">History</th></tr></thead>
           <tbody>${filtered.slice(0,8).map(e => `
             <tr><td>${getBrandBadgeHtml(e.competitor)}</td><td>${e.category}</td><td>${e.size}</td>
             <td style="text-align:right" class="price">${formatPrice(e.price)}</td>
-            <td>${e.source || '—'}</td><td>${e.dealer || '—'}</td><td>${timeAgo(e.createdAt)}</td>
+            <td>${e.source || '—'}</td><td>${e.dealer || '—'}</td>
+            <td>${e.addedBy ? '<b style="font-size:12px">' + e.addedBy + '</b>' : '—'}</td><td>${timeAgo(e.createdAt)}</td>
             <td style="text-align:center"><button class="btn btn-sm btn-outline" onclick="showHistory(data.find(d => d.id === '${e.id}'))" title="History">📈</button></td></tr>
           `).join('')}</tbody>
         </table>
@@ -695,16 +876,18 @@ function renderRecords(main) {
     ${f.length ? `
     <div class="card" style="padding:0">
       <div class="table-wrap">
-        <table><thead><tr><th>Brand</th><th>Cat</th><th>Size</th><th>Pattern</th><th style="text-align:right">Price</th><th>Source</th><th>Dealer</th><th>Verified</th><th style="text-align:center">Actions</th></tr></thead>
+        <table><thead><tr><th>Brand</th><th>Cat</th><th>Size</th><th>Pattern</th><th style="text-align:right">Price</th><th>Source</th><th>Dealer</th><th>Verified</th><th>Added By</th><th style="text-align:center">Actions</th></tr></thead>
         <tbody>${f.map(e => `
           <tr><td>${getBrandBadgeHtml(e.competitor)}</td><td>${e.category}</td><td>${e.size}</td><td>${e.pattern || '—'}</td>
           <td style="text-align:right" class="price">${formatPrice(e.price)}</td>
           <td>${e.source || '—'}</td><td style="max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.dealer || '—'}</td>
           <td>${e.verifiedOn ? shortDate(e.verifiedOn) : '—'}</td>
+          <td>${e.addedBy ? '<b style="font-size:12px">' + e.addedBy + '</b>' : '—'}</td>
           <td style="text-align:center">
-            <button class="btn btn-sm btn-outline" onclick="openModal(data.find(d => d.id === '${e.id}'))" title="Edit">✎</button>
             <button class="btn btn-sm btn-outline" onclick="showHistory(data.find(d => d.id === '${e.id}'))" title="History">📈</button>
-            <button class="btn btn-sm btn-danger" onclick="deleteEntry('${e.id}')" title="Delete">✕</button>
+            ${isAdmin() ? `
+            <button class="btn btn-sm btn-outline" onclick="openModal(data.find(d => d.id === '${e.id}'))" title="Edit">✎</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteEntry('${e.id}')" title="Delete">✕</button>` : ''}
           </td></tr>
         `).join('')}</tbody></table>
       </div>
@@ -753,7 +936,7 @@ function showHistory(entry) {
       ${matches.length > 1 ? `<div class="chart-container" style="height:200px;margin-bottom:16px"><canvas id="historyChart"></canvas></div>` : ''}
       <div class="table-wrap">
         <table>
-          <thead><tr><th style="text-align:right">#</th><th>Date</th><th style="text-align:right">Price</th><th>Source</th><th>Dealer</th><th>Notes</th></tr></thead>
+          <thead><tr><th style="text-align:right">#</th><th>Date</th><th style="text-align:right">Price</th><th>Source</th><th>Dealer</th><th>Added By</th><th>Notes</th></tr></thead>
           <tbody>${matches.map((e, i) => `
             <tr>
               <td style="text-align:right">${matches.length - i}</td>
@@ -761,6 +944,7 @@ function showHistory(entry) {
               <td style="text-align:right" class="price">${formatPrice(e.price)}</td>
               <td>${e.source || '—'}</td>
               <td>${e.dealer || '—'}</td>
+              <td>${e.addedBy ? '<b style="font-size:12px">' + e.addedBy + '</b>' : '—'}</td>
               <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.notes || '—'}</td>
             </tr>
           `).join('')}</tbody>
@@ -791,8 +975,8 @@ function showHistory(entry) {
 // ======================== EXPORT ========================
 function exportCSV() {
   if (!data.length) { alert('No data.'); return; }
-  const h = ['Size','Brand','Pattern','Category','Source','Price (AED)','Dealer','Verified On','Notes','Created','Updated'];
-  const csv = [h.join(',')].concat(data.map(e => [e.size, e.competitor, e.pattern||'', e.category, e.source||'', e.price, (e.dealer||'').replace(/,/g,';'), e.verifiedOn||'', (e.notes||'').replace(/,/g,';'), e.createdAt, e.updatedAt].join(','))).join('\n');
+  const h = ['Size','Brand','Pattern','Category','Source','Price (AED)','Dealer','Verified On','Added By','Notes','Created','Updated'];
+  const csv = [h.join(',')].concat(data.map(e => [e.size, e.competitor, e.pattern||'', e.category, e.source||'', e.price, (e.dealer||'').replace(/,/g,';'), e.verifiedOn||'', e.addedBy||'', (e.notes||'').replace(/,/g,';'), e.createdAt, e.updatedAt].join(','))).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'tyre_prices_' + new Date().toISOString().slice(0,10) + '.csv'; a.click();
 }
 
@@ -807,7 +991,7 @@ function exportExcel() {
   if (sizeV !== 'All') f = f.filter(d => d.size === sizeV);
   if (search) f = f.filter(d => [d.size,d.pattern||'',d.competitor,d.category,d.dealer||''].some(v => v.toLowerCase().includes(search)));
   if (!f.length) { alert('No filtered records to export.'); return; }
-  const rows = f.map(e => ({ Size: e.size, Brand: e.competitor, Pattern: e.pattern||'', Category: e.category, Source: e.source||'', 'Price (AED)': e.price, Dealer: e.dealer||'', 'Verified On': e.verifiedOn||'', Notes: e.notes||'', Created: e.createdAt, Updated: e.updatedAt }));
+  const rows = f.map(e => ({ Size: e.size, Brand: e.competitor, Pattern: e.pattern||'', Category: e.category, Source: e.source||'', 'Price (AED)': e.price, Dealer: e.dealer||'', 'Verified On': e.verifiedOn||'', 'Added By': e.addedBy||'', Notes: e.notes||'', Created: e.createdAt, Updated: e.updatedAt }));
   const ws = XLSX.utils.json_to_sheet(rows);
   ws['!cols'] = Object.keys(rows[0]).map((_, i) => ({ wch: i < 3 ? 18 : i === 5 ? 14 : 20 }));
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Prices');
@@ -823,22 +1007,24 @@ function switchView(view) {
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.nav-item[data-view]').forEach(el => el.addEventListener('click', () => switchView(el.dataset.view)));
   const app = document.getElementById('app');
-  if (app) app.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text2)"><div style="text-align:center"><div style="font-size:40px;margin-bottom:12px">⏳</div><div>Loading shared data…</div></div></div>';
+  if (app) app.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text2)"><div style="text-align:center"><div style="font-size:40px;margin-bottom:12px">⏳</div><div>Connecting…</div></div></div>';
+  const savedUser = localStorage.getItem('tpi_user');
+  if (savedUser) { try { currentUser = JSON.parse(savedUser); } catch { currentUser = null; } }
   loadData().then(() => { render(); updateSyncPill(); });
 
   setInterval(async () => {
     const active = document.activeElement;
     const typing = active && (active.tagName === 'INPUT' || active.tagName === 'SELECT' || active.tagName === 'TEXTAREA');
-    if (typing || document.querySelector('.modal-overlay')) return;
+    if (typing || document.querySelector('.modal-overlay') || !currentUser) return;
     try {
-      const j = await apiGet();
+      const j = await apiPost({ action: 'load' });
       const sig = JSON.stringify(j.records) + '|' + JSON.stringify([j.brands, j.sizes, j.patterns, j.dealers]);
       if (sig !== syncedJson) { syncedJson = sig; data = j.records || []; customBrands = j.brands || []; customSizes = j.sizes || []; customPatterns = j.patterns || []; customDealers = j.dealers || []; render(); }
       lastSync = Date.now(); updateSyncPill(); hideBanner();
     } catch (err) { updateSyncPill(); }
   }, 20000);
 
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) { loadData().then(render); } });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && currentUser) { loadData().then(render); } });
 });
 document.getElementById('modal')?.addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
 </script>
