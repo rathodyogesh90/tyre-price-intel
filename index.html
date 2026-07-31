@@ -583,10 +583,13 @@ function showLogin() {
         <input class="search" id="loginPass" type="password" style="width:100%;margin-bottom:16px" placeholder="Password" autocomplete="current-password">
         <div id="loginErr" style="color:var(--red);font-size:12px;margin-bottom:10px;min-height:16px"></div>
         <button class="btn btn-primary" style="width:100%" id="loginBtn" onclick="doLogin()">Sign In</button>
-        <p style="margin-top:16px;font-size:11px;color:var(--text2);text-align:center">Admin default: <b>admin / admin</b> (change it in Users)</p>
       </div>
     </div>`;
-  setTimeout(() => document.getElementById('loginUser').focus(), 50);
+  setTimeout(() => {
+    const u = document.getElementById('loginUser'), p = document.getElementById('loginPass');
+    if (u) u.focus();
+    if (p) p.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  }, 50);
 }
 async function doLogin() {
   const u = document.getElementById('loginUser').value.trim();
