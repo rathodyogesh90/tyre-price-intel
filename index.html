@@ -599,7 +599,10 @@ function renderLineChart(cId, labels, datasets) {
     data: { labels, datasets: datasets.map((ds, i) => ({ label: ds.label, data: ds.data, borderColor: colors[i % colors.length], backgroundColor: colors[i % colors.length] + '20', tension: .3, fill: false, pointRadius: 3, pointHoverRadius: 5 })) },
     options: {
       responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { labels: { color: '#8890a8', usePointStyle: true, padding: 10, font: { size: 11 } } } },
+      plugins: {
+        legend: { display: false },
+        tooltip: { mode: 'index', intersect: false, callbacks: { label: c => ' ' + c.dataset.label + ': AED ' + Number(c.parsed.y).toLocaleString('en-AE') } }
+      },
       scales: {
         y: { beginAtZero: false, grid: { color: 'rgba(128,128,128,0.08)' }, ticks: { color: '#8890a8', font: { size: 10 }, callback: v => 'AED ' + Number(v).toLocaleString('en-AE') } },
         x: { grid: { display: false }, ticks: { color: '#8890a8', font: { size: 10 } } }
@@ -978,7 +981,7 @@ function resetFilters() {
 }
 
 // ======================== HISTORY ========================
-let historyCharts = {};
+let historyChart = null;
 function historySeries(matches, filterFn, title, color) {
   const list = matches.filter(filterFn).sort((a, b) => recTime(a) - recTime(b));
   return { title, color, labels: list.map(e => e.verifiedOn ? shortDate(e.verifiedOn) : shortDate(e.createdAt)), prices: list.map(e => e.price) };
@@ -988,15 +991,26 @@ function drawHistoryChart(canvasId, series) {
   if (!canvas) return;
   destroyChart(canvasId);
   const ctx = canvas.getContext('2d');
-  historyCharts[canvasId] = new Chart(ctx, {
+  const allDates = Array.from(new Set(series.flatMap(s => s.labels)));
+  const idx = {};
+  allDates.forEach((d, i) => idx[d] = i);
+  const active = series.filter(s => s.labels.length);
+  historyChart = new Chart(ctx, {
     type: 'line',
-    data: { labels: series.labels, datasets: [{ label: series.title + ' (AED)', data: series.prices, borderColor: series.color, backgroundColor: series.color + '18', fill: true, tension: .3, pointRadius: 5, pointBackgroundColor: series.color }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false, ticks: { callback: v => v.toLocaleString() } }, x: { ticks: { color: '#8890a8', font: { size: 10 } } } } }
+    data: {
+      labels: allDates,
+      datasets: active.map(s => {
+        const pts = new Array(allDates.length).fill(null);
+        s.labels.forEach((l, i) => { if (idx[l] !== undefined) pts[idx[l]] = s.prices[i]; });
+        return { label: s.title, data: pts, borderColor: s.color, backgroundColor: s.color + '18', fill: false, tension: .3, pointRadius: 4, pointHoverRadius: 6 };
+      })
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { labels: { color: '#8890a8', usePointStyle: true, padding: 10, font: { size: 11 } } } },
+      scales: { y: { beginAtZero: false, ticks: { callback: v => v.toLocaleString() } }, x: { ticks: { color: '#8890a8', font: { size: 10 } } } }
+    }
   });
-}
-function destroyHistoryCharts() {
-  Object.keys(historyCharts).forEach(k => { if (historyCharts[k]) { historyCharts[k].destroy(); delete historyCharts[k]; } });
-  historyCharts = {};
 }
 
 function showHistory(entry) {
@@ -1005,29 +1019,25 @@ function showHistory(entry) {
     .sort((a, b) => recTime(b) - recTime(a));
   if (matches.length < 2) { alert('Only one record exists for this size + brand + pattern combination.'); return; }
 
-  const dealer = historySeries(matches, e => (e.priceType || 'Dealer') === 'Dealer', 'Dealer Price', '#3498db');
-  const endUser = historySeries(matches, e => (e.priceType || 'Dealer') === 'End User', 'End User Price', '#27ae60');
-  const cash = historySeries(matches, e => !!e.cashPrice, 'Cash Price', '#6c5ce7');
-
-  function chartBlock(s, uid) {
-    if (!s.labels.length) return '<div class="chart-container" style="height:60px;margin-bottom:16px;display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:12px;background:var(--surface2);border-radius:12px">No ' + s.title + ' data for this combination</div>';
-    return '<div style="margin-bottom:14px"><div style="font-size:12px;font-weight:700;color:' + s.color + ';margin-bottom:6px">' + s.title + '</div><div class="chart-container" style="height:150px"><canvas id="' + uid + '"></canvas></div></div>';
-  }
+  const series = [
+    historySeries(matches, e => (e.priceType || 'Dealer') === 'Dealer', 'Dealer Price', '#3498db'),
+    historySeries(matches, e => (e.priceType || 'Dealer') === 'End User', 'End User Price', '#27ae60'),
+    historySeries(matches, e => !!e.cashPrice, 'Cash Price', '#6c5ce7')
+  ];
+  const hasAny = series.some(s => s.labels.length);
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
-  overlay.addEventListener('click', e => { if (e.target === overlay) { destroyHistoryCharts(); overlay.remove(); } });
+  overlay.addEventListener('click', e => { if (e.target === overlay) { if (historyChart) { historyChart.destroy(); historyChart = null; } overlay.remove(); } });
 
   overlay.innerHTML = `
     <div class="card" style="width:100%;max-width:780px;max-height:90vh;overflow-y:auto;padding:24px;animation:fadeIn .2s ease">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
         <div><h2 style="margin:0">${getBrandBadgeHtml(entry.competitor)} ${entry.size} ${entry.pattern ? '— ' + entry.pattern : ''}</h2><p style="margin:4px 0 0;opacity:.6">${matches.length} records · ${matches[0].category} · ordered by Verified On</p></div>
-        <button class="btn btn-sm btn-outline" onclick="const o=this.closest('.modal-overlay');destroyHistoryCharts();o.remove()" title="Close">✕</button>
+        <button class="btn btn-sm btn-outline" onclick="const o=this.closest('.modal-overlay');if(historyChart){historyChart.destroy();historyChart=null}o.remove()" title="Close">✕</button>
       </div>
-      ${chartBlock(dealer, 'histChartDealer')}
-      ${chartBlock(endUser, 'histChartEndUser')}
-      ${chartBlock(cash, 'histChartCash')}
+      ${hasAny ? '<div class="chart-container" style="height:220px;margin-bottom:16px"><canvas id="histChart"></canvas></div>' : '<div style="height:60px;margin-bottom:16px;display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:12px;background:var(--surface2);border-radius:12px">No price history data for this combination</div>'}
       <div class="table-wrap">
         <table>
           <thead><tr><th style="text-align:right">#</th><th>Verified On</th><th style="text-align:right">Price</th><th>Price Type</th><th>Cash Price</th><th>Source</th><th>Dealer</th><th>Added By</th><th>Notes</th></tr></thead>
@@ -1050,11 +1060,7 @@ function showHistory(entry) {
 
   document.body.appendChild(overlay);
 
-  setTimeout(() => {
-    drawHistoryChart('histChartDealer', dealer);
-    drawHistoryChart('histChartEndUser', endUser);
-    drawHistoryChart('histChartCash', cash);
-  }, 50);
+  setTimeout(() => drawHistoryChart('histChart', series), 50);
 }
 
 // ======================== EXPORT ========================
