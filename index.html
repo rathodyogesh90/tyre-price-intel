@@ -94,6 +94,13 @@ select option { background: var(--surface); }
 .input-group { display: flex; gap: 6px; align-items: flex-start; }
 .input-group select { flex: 1; }
 .input-group input { flex: 1; }
+.ac { position: relative; }
+.ac-list { display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 60; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.28); max-height: 220px; overflow-y: auto; }
+.ac-list.show { display: block; }
+.ac-item { padding: 9px 12px; font-size: 13px; cursor: pointer; color: var(--text); border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ac-item:last-child { border-bottom: none; }
+.ac-item:hover, .ac-item.active { background: rgba(108,92,231,.14); color: var(--primary); }
+.ac-item.ac-other { font-weight: 600; border-top: 1px dashed var(--border); }
 .hidden { display: none !important; }
 .filters { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
 .filters input, .filters select { width: auto; min-width: 120px; }
@@ -193,21 +200,21 @@ select option { background: var(--surface); }
     <h2 id="modalTitle">Add Entry</h2>
     <div class="form-grid">
       <div class="full"><label>Tyre Size <span class="req">*</span></label>
-        <div class="input-group">
-          <select id="fSizeSelect" onchange="toggleSizeInput()"></select>
-          <input id="fSizeInput" class="hidden" placeholder="Enter size" oninput="syncSizeSelect()">
+        <div class="ac">
+          <input id="fSizeInput" placeholder="Type to search size" autocomplete="off" oninput="acFilter('size')" onblur="acBlur()" onkeydown="acKey('size', event)">
+          <div class="ac-list" id="acSizeList"></div>
         </div>
       </div>
       <div class="full"><label>Brand / Competitor <span class="req">*</span></label>
-        <div class="input-group">
-          <select id="fCompSelect" onchange="toggleCompInput()"></select>
-          <input id="fCompInput" class="hidden" placeholder="Enter brand" oninput="syncCompSelect()">
+        <div class="ac">
+          <input id="fCompInput" placeholder="Type to search brand" autocomplete="off" oninput="acFilter('comp')" onblur="acBlur()" onkeydown="acKey('comp', event)">
+          <div class="ac-list" id="acCompList"></div>
         </div>
       </div>
       <div class="full"><label>Pattern / Model</label>
-        <div class="input-group">
-          <select id="fPatternSelect" onchange="togglePatternInput()"></select>
-          <input id="fPatternInput" class="hidden" placeholder="Enter pattern" oninput="syncPatternSelect()">
+        <div class="ac">
+          <input id="fPatternInput" placeholder="Type to search pattern" autocomplete="off" oninput="acFilter('pattern')" onblur="acBlur()" onkeydown="acKey('pattern', event)">
+          <div class="ac-list" id="acPatternList"></div>
         </div>
       </div>
       <div><label>Category <span class="req">*</span></label><select id="fCategory"><option>OTR</option><option>Industrial</option><option>Solid</option><option>Truck & Bus</option><option>OTB</option><option>LCV/LT</option></select></div>
@@ -217,9 +224,9 @@ select option { background: var(--surface); }
         <div class="checkbox-group"><input type="checkbox" id="fCashPrice"><span>Cash Price</span></div>
       </div>
       <div class="full"><label>Dealer / Distributor</label>
-        <div class="input-group">
-          <select id="fDealerSelect" onchange="toggleDealerInput()"></select>
-          <input id="fDealerInput" class="hidden" placeholder="Enter dealer" oninput="syncDealerSelect()">
+        <div class="ac">
+          <input id="fDealerInput" placeholder="Type to search dealer" autocomplete="off" oninput="acFilter('dealer')" onblur="acBlur()" onkeydown="acKey('dealer', event)">
+          <div class="ac-list" id="acDealerList"></div>
         </div>
       </div>
       <div><label>Price (AED) <span class="req">*</span></label><input type="number" id="fPrice" step="0.01" min="0" placeholder="e.g. 4250"></div>
@@ -400,68 +407,59 @@ function toggleTheme() {
 
 function generateId() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 
-// ======================== BRAND SELECT ========================
-function renderBrandSelect(selectId, inputId, selectedVal) {
-  const sel = document.getElementById(selectId), inp = document.getElementById(inputId), all = getAllBrands();
-  sel.innerHTML = all.map(b => '<option value="' + b.replace(/"/g,'&quot;') + '">' + b + '</option>').join('') + '<option value="__other__">Other (specify)</option>';
-  if (selectedVal && all.includes(selectedVal)) { sel.value = selectedVal; inp.classList.add('hidden'); inp.value = ''; }
-  else if (selectedVal) { sel.value = '__other__'; inp.classList.remove('hidden'); inp.value = selectedVal; }
-  else { sel.value = all[0]; inp.classList.add('hidden'); inp.value = ''; }
+// ======================== AUTOCOMPLETE FIELDS ========================
+const AC = {
+  size:    { input: 'fSizeInput',    list: 'acSizeList',    all: () => getAllSizes() },
+  comp:    { input: 'fCompInput',    list: 'acCompList',    all: () => getAllBrands() },
+  pattern: { input: 'fPatternInput', list: 'acPatternList', all: () => getAllPatterns() },
+  dealer:  { input: 'fDealerInput',  list: 'acDealerList',  all: () => getAllDealers() }
+};
+function escAttr(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function closeAllAc() { Object.values(AC).forEach(c => { const l = document.getElementById(c.list); if (l) l.classList.remove('show'); }); }
+function acFilter(kind) {
+  const cfg = AC[kind];
+  const input = document.getElementById(cfg.input), list = document.getElementById(cfg.list);
+  const q = input.value.trim();
+  const lq = q.toLowerCase();
+  let items = q ? cfg.all().filter(v => v.toLowerCase().includes(lq)) : [];
+  if (items.length > 50) items = items.slice(0, 50);
+  const exact = items.some(v => v.toLowerCase() === lq);
+  let html = items.map(v => '<div class="ac-item" data-kind="' + kind + '" data-v="' + escAttr(v) + '">' + escAttr(v) + '</div>').join('');
+  if (!exact) html += '<div class="ac-item ac-other" data-kind="' + kind + '" data-v="' + escAttr(q) + '">Other (specify) — use "' + escAttr(q || 'type here') + '"</div>';
+  list.innerHTML = html;
+  list.classList.toggle('show', !!html);
+  if (html) list.scrollTop = 0;
 }
-function toggleCompInput() {
-  const s=document.getElementById('fCompSelect'), i=document.getElementById('fCompInput');
-  s.value==='__other__' ? (i.classList.remove('hidden'),i.focus()) : (i.classList.add('hidden'),i.value='');
+function acKey(kind, e) {
+  const cfg = AC[kind], input = document.getElementById(cfg.input), list = document.getElementById(cfg.list);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (!list.classList.contains('show')) return;
+    e.preventDefault();
+    const items = list.querySelectorAll('.ac-item');
+    const cur = list.querySelector('.ac-item.active');
+    let idx = Array.prototype.indexOf.call(items, cur);
+    idx = e.key === 'ArrowDown' ? Math.min(idx + 1, items.length - 1) : Math.max(idx - 1, 0);
+    if (cur) cur.classList.remove('active');
+    items[idx].classList.add('active');
+    items[idx].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    const cur = list.querySelector('.ac-item.active');
+    if (cur) { e.preventDefault(); input.value = cur.dataset.v; closeAllAc(); }
+  } else if (e.key === 'Escape') { closeAllAc(); }
 }
-function syncCompSelect() {
-  const i=document.getElementById('fCompInput'), s=document.getElementById('fCompSelect');
-  if (i.value.trim() && s.value!=='__other__') { s.value='__other__'; toggleCompInput(); }
-}
-function getCompValue() { const s=document.getElementById('fCompSelect'); return s.value==='__other__' ? document.getElementById('fCompInput').value.trim() : s.value; }
-
-// ======================== SIZE SELECT ========================
-function renderSizeSelect(selectId, inputId, selectedVal) {
-  const sel = document.getElementById(selectId), inp = document.getElementById(inputId), all = getAllSizes();
-  sel.innerHTML = all.map(s => '<option value="' + s + '">' + s + '</option>').join('') + '<option value="__other__">Other (specify)</option>';
-  if (selectedVal && all.includes(selectedVal)) { sel.value = selectedVal; inp.classList.add('hidden'); inp.value = ''; }
-  else if (selectedVal) { sel.value = '__other__'; inp.classList.remove('hidden'); inp.value = selectedVal; }
-  else { sel.selectedIndex = -1; inp.classList.add('hidden'); inp.value = ''; }
-}
-function toggleSizeInput() {
-  const s=document.getElementById('fSizeSelect'), i=document.getElementById('fSizeInput');
-  s.value==='__other__' ? (i.classList.remove('hidden'),i.focus()) : (i.classList.add('hidden'),i.value='');
-}
-function syncSizeSelect() {
-  const i=document.getElementById('fSizeInput'), s=document.getElementById('fSizeSelect');
-  if (i.value.trim() && s.value!=='__other__') { s.value='__other__'; toggleSizeInput(); }
-}
-function getSizeValue() { const s=document.getElementById('fSizeSelect'); return s.value==='__other__' ? document.getElementById('fSizeInput').value.trim() : s.value; }
-
-// ======================== PATTERN SELECT ========================
-function renderPatternSelect(selectId, inputId, selectedVal) {
-  const sel = document.getElementById(selectId), inp = document.getElementById(inputId), all = getAllPatterns();
-  sel.innerHTML = '<option value="">Select</option>' + all.map(p => '<option value="' + p.replace(/"/g,'&quot;') + '">' + p + '</option>').join('') + '<option value="__other__">Other (specify)</option>';
-  if (selectedVal && all.includes(selectedVal)) { sel.value = selectedVal; inp.classList.add('hidden'); inp.value = ''; }
-  else if (selectedVal) { sel.value = '__other__'; inp.classList.remove('hidden'); inp.value = selectedVal; }
-  else { sel.value = ''; inp.classList.add('hidden'); inp.value = ''; }
-}
-function togglePatternInput() {
-  const s=document.getElementById('fPatternSelect'), i=document.getElementById('fPatternInput');
-  s.value==='__other__' ? (i.classList.remove('hidden'),i.focus()) : (i.classList.add('hidden'),i.value='');
-}
-function syncPatternSelect() {
-  const i=document.getElementById('fPatternInput'), s=document.getElementById('fPatternSelect');
-  if (i.value.trim() && s.value!=='__other__') { s.value='__other__'; togglePatternInput(); }
-}
-function getPatternValue() { const s=document.getElementById('fPatternSelect'); return s.value==='__other__' ? document.getElementById('fPatternInput').value.trim() : s.value; }
-
-// ======================== DEALER SELECT ========================
-function renderDealerSelect(selectId, inputId, selectedVal) {
-  const sel = document.getElementById(selectId), inp = document.getElementById(inputId), all = getAllDealers();
-  sel.innerHTML = '<option value="">Select</option>' + all.map(d => '<option value="' + d.replace(/"/g,'&quot;') + '">' + d + '</option>').join('') + '<option value="__other__">Other (specify)</option>';
-  if (selectedVal && all.includes(selectedVal)) { sel.value = selectedVal; inp.classList.add('hidden'); inp.value = ''; }
-  else if (selectedVal) { sel.value = '__other__'; inp.classList.remove('hidden'); inp.value = selectedVal; }
-  else { sel.value = ''; inp.classList.add('hidden'); inp.value = ''; }
-}
+function acBlur() { setTimeout(closeAllAc, 150); }
+function acSet(kind, value) { document.getElementById(AC[kind].input).value = value || ''; closeAllAc(); }
+function getSizeValue() { return document.getElementById('fSizeInput').value.trim(); }
+function getCompValue() { return document.getElementById('fCompInput').value.trim(); }
+function getPatternValue() { return document.getElementById('fPatternInput').value.trim(); }
+function getDealerValue() { return document.getElementById('fDealerInput').value.trim(); }
+document.addEventListener('mousedown', e => {
+  const item = e.target.closest('.ac-item');
+  if (item) {
+    document.getElementById(AC[item.dataset.kind].input).value = item.dataset.v;
+    closeAllAc();
+  } else if (!e.target.closest('.ac')) { closeAllAc(); }
+});
 function toggleDealerInput() {
   const s=document.getElementById('fDealerSelect'), i=document.getElementById('fDealerInput');
   s.value==='__other__' ? (i.classList.remove('hidden'),i.focus()) : (i.classList.add('hidden'),i.value='');
@@ -479,15 +477,15 @@ function openModal(entry) {
   editId = entry ? entry.id : null;
   document.getElementById('modalTitle').textContent = editId ? 'Edit Price' : 'Add New Price';
   document.getElementById('modalSaveBtn').textContent = editId ? 'Update' : 'Save';
-  renderSizeSelect('fSizeSelect','fSizeInput', entry ? entry.size : '');
-  renderBrandSelect('fCompSelect','fCompInput', entry ? entry.competitor : 'MRF');
-  renderPatternSelect('fPatternSelect','fPatternInput', entry ? entry.pattern : '');
+  acSet('size', entry ? entry.size : '');
+  acSet('comp', entry ? entry.competitor : '');
+  acSet('pattern', entry ? entry.pattern : '');
   document.getElementById('fCategory').value = entry ? entry.category : 'OTR';
   document.getElementById('fSource').value = entry ? (entry.source || 'Dealer Quote') : 'Dealer Quote';
   document.getElementById('fPriceType').value = entry ? (entry.priceType || 'Dealer') : 'Dealer';
   document.getElementById('fCashPrice').checked = entry ? !!entry.cashPrice : false;
   document.getElementById('fPrice').value = entry ? entry.price : '';
-  renderDealerSelect('fDealerSelect','fDealerInput', entry ? entry.dealer : '');
+  acSet('dealer', entry ? entry.dealer : '');
   document.getElementById('fVerified').value = entry ? (entry.verifiedOn || new Date().toISOString().slice(0,10)) : new Date().toISOString().slice(0,10);
   document.getElementById('fNotes').value = entry ? entry.notes : '';
   document.getElementById('modal').classList.add('open');
