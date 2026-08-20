@@ -138,13 +138,15 @@ select option { background: var(--surface); }
 }
 @media (max-width: 900px) {
   .menu-btn { display: flex; }
+  body.menu-hidden .menu-btn { display: none; }
   .sidebar { position: fixed; left: 0; top: 0; z-index: 1050; transform: translateX(-100%); transition: transform .25s ease; border-radius: 0 20px 20px 0; box-shadow: 0 0 40px rgba(0,0,0,.4); }
   .sidebar.open { transform: translateX(0); }
   .main { max-width: 100vw; padding: 64px 14px 24px; }
   .chart-grid { grid-template-columns: 1fr; }
   .row { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
   .form-grid { grid-template-columns: 1fr; }
-  .modal { max-width: 98vw; padding: 16px; }
+  .modal-overlay { padding: 18px; }
+  .modal { width: 100%; max-width: 100%; }
   .header { flex-direction: column; }
   .header-actions { width: 100%; }
   .header-actions .btn { flex: 1; justify-content: center; }
@@ -1052,8 +1054,8 @@ function exportExcel() {
 }
 
 // ======================== NAVIGATION ========================
-function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); document.getElementById('sideBackdrop').classList.toggle('open'); }
-function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sideBackdrop').classList.remove('open'); }
+function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); document.getElementById('sideBackdrop').classList.toggle('open'); document.body.classList.toggle('menu-hidden', document.getElementById('sidebar').classList.contains('open')); }
+function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sideBackdrop').classList.remove('open'); document.body.classList.remove('menu-hidden'); }
 function switchView(view) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === view));
   closeSidebar();
