@@ -145,8 +145,8 @@ select option { background: var(--surface); }
   .chart-grid { grid-template-columns: 1fr; }
   .row { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
   .form-grid { grid-template-columns: 1fr; }
-  .modal-overlay { padding: 18px; }
-  .modal { width: 100%; max-width: 100%; }
+  .modal-overlay { padding: 24px 18px; }
+  .modal { width: 100%; max-width: 100%; max-height: calc(100vh - 48px); }
   .header { flex-direction: column; }
   .header-actions { width: 100%; }
   .header-actions .btn { flex: 1; justify-content: center; }
@@ -475,7 +475,7 @@ function getDealerValue() { const s=document.getElementById('fDealerSelect'); re
 // ======================== MODAL ========================
 function openModal(entry) {
   if (!currentUser) { showLogin(); return; }
-  if (entry && !isAdmin()) { alert('Only the admin can edit records.'); return; }
+  if (entry && !isAdmin() && entry.addedBy !== currentUser.username) { alert('You can only edit records you entered yourself.'); return; }
   editId = entry ? entry.id : null;
   document.getElementById('modalTitle').textContent = editId ? 'Edit Price' : 'Add New Price';
   document.getElementById('modalSaveBtn').textContent = editId ? 'Update' : 'Save';
@@ -512,14 +512,19 @@ function validateForm(f) {
   return true;
 }
 async function saveEntry() {
-  if (editId && !isAdmin()) { alert('Only the admin can edit records.'); return; }
   const f = collectForm();
   if (!validateForm(f)) return;
-  ensureCustomBrand(f.competitor); ensureCustomSize(f.size); ensureCustomPattern(f.pattern); ensureCustomDealer(f.dealer);
   const now = new Date().toISOString();
+  const editTargetId = editId;
+  if (editTargetId) {
+    const orig = data.find(d => d.id === editTargetId);
+    if (!orig) return;
+    if (!isAdmin() && orig.addedBy !== currentUser.username) { alert('You can only edit records you entered yourself.'); return; }
+  }
+  ensureCustomBrand(f.competitor); ensureCustomSize(f.size); ensureCustomPattern(f.pattern); ensureCustomDealer(f.dealer);
   closeModal();
-  if (editId) {
-    const idx = data.findIndex(d => d.id === editId);
+  if (editTargetId) {
+    const idx = data.findIndex(d => d.id === editTargetId);
     if (idx < 0) return;
     const rec = { ...data[idx], ...f, updatedAt: now };
     data[idx] = rec;
@@ -533,7 +538,9 @@ async function saveEntry() {
   render();
 }
 async function deleteEntry(id) {
-  if (!isAdmin()) { alert('Only the admin can delete records.'); return; }
+  const target = data.find(d => d.id === id);
+  if (!target) return;
+  if (!isAdmin() && target.addedBy !== currentUser.username) { alert('You can only delete records you entered yourself.'); return; }
   if (!confirm('Delete entry?')) return;
   data = data.filter(d => d.id !== id);
   try { await apiDeleteRecord(id); lastSync = Date.now(); updateSyncPill(); } catch (err) { showBanner('Deleted locally but could not sync to shared database.'); }
@@ -941,7 +948,7 @@ function renderRecords(main) {
           <td>${e.addedBy ? '<b style="font-size:12px">' + e.addedBy + '</b>' : '—'}</td>
           <td style="text-align:center">
             ${historyBtnHtml(e)}
-            ${isAdmin() ? `
+            ${isAdmin() || e.addedBy === currentUser.username ? `
             <button class="btn btn-sm btn-outline" onclick="openModal(data.find(d => d.id === '${e.id}'))" title="Edit">✎</button>
             <button class="btn btn-sm btn-danger" onclick="deleteEntry('${e.id}')" title="Delete">✕</button>` : ''}
           </td></tr>
